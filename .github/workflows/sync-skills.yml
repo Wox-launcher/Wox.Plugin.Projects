@@ -3,7 +3,7 @@ name: Sync Skills from Wox
 on:
   schedule:
     # Run daily at UTC 08:00
-    - cron: '0 8 * * *'
+    - cron: "0 8 * * *"
   workflow_dispatch: # Allow manual trigger
 
 jobs:
