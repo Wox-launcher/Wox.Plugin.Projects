@@ -21,10 +21,17 @@ interface GitProject {
   projectUrl?: string
 }
 
+interface ActionLabels {
+  openInVSCode: string
+  openInGithub: string
+  openInGitlab: string
+}
+
 let api: PublicAPI
 let projectsCache: GitProject[] = []
 let lastScanTime = 0
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+const PROJECT_PATH_CONTEXT_KEY = "projectPath"
 
 async function getSettings(ctx: Context): Promise<ScanDirectory[]> {
   const directoriesJson = await api.GetSetting(ctx, "scanDirectories")
@@ -107,20 +114,31 @@ async function scanDirectory(dirPath: string): Promise<GitProject[]> {
 
     // Check if it's a git repository
     if (fs.existsSync(path.join(fullPath, ".git"))) {
-      // Check if it's a Wox plugin
-      const woxIcon = getWoxPluginIcon(fullPath)
-      const projectPage = await getProjectPageInfo(fullPath)
-      projects.push({
-        name: entry.name,
-        path: fullPath,
-        icon: woxIcon,
-        provider: projectPage?.provider,
-        projectUrl: projectPage?.projectUrl
-      })
+      const project = await getProjectByPath(fullPath, entry.name)
+      if (project) {
+        projects.push(project)
+      }
     }
   }
 
   return projects
+}
+
+async function getProjectByPath(projectPath: string, projectName?: string): Promise<GitProject | undefined> {
+  if (!fs.existsSync(projectPath) || !fs.existsSync(path.join(projectPath, ".git"))) {
+    return undefined
+  }
+
+  const woxIcon = getWoxPluginIcon(projectPath)
+  const projectPage = await getProjectPageInfo(projectPath)
+
+  return {
+    name: projectName || path.basename(projectPath),
+    path: projectPath,
+    icon: woxIcon,
+    provider: projectPage?.provider,
+    projectUrl: projectPage?.projectUrl
+  }
 }
 
 async function getProjectPageInfo(projectPath: string): Promise<{ provider: GitProvider; projectUrl: string } | undefined> {
@@ -266,6 +284,64 @@ function getProjectIcon(project: GitProject): WoxImage {
   return parseIcon("relative:images/app.svg")
 }
 
+function createProjectActions(ctx: Context, project: GitProject, labels: ActionLabels): NonNullable<Result["Actions"]> {
+  const contextData = { [PROJECT_PATH_CONTEXT_KEY]: project.path }
+  const actions: NonNullable<Result["Actions"]> = [
+    {
+      Name: labels.openInVSCode,
+      Icon: { ImageType: "relative", ImageData: "images/vscode.svg" },
+      IsDefault: true,
+      ContextData: contextData,
+      Action: async () => {
+        await openInVSCode(ctx, project.path)
+      }
+    }
+  ]
+
+  if (project.projectUrl && project.provider) {
+    actions.push({
+      Name: project.provider === "github" ? labels.openInGithub : labels.openInGitlab,
+      Icon: { ImageType: "relative", ImageData: project.provider === "github" ? "images/github.svg" : "images/gitlab.svg" },
+      Hotkey: "ctrl+enter",
+      ContextData: contextData,
+      Action: async () => {
+        await openProjectPage(ctx, project.projectUrl as string)
+      }
+    })
+  }
+
+  return actions
+}
+
+function createProjectResult(ctx: Context, project: GitProject, labels: ActionLabels): Result {
+  return {
+    Title: project.name,
+    SubTitle: project.path,
+    Icon: getProjectIcon(project),
+    Actions: createProjectActions(ctx, project, labels)
+  }
+}
+
+async function getActionLabels(ctx: Context): Promise<ActionLabels> {
+  const [openInVSCode, openInGithub, openInGitlab] = await Promise.all([getTranslation(ctx, "open_in_vscode"), getTranslation(ctx, "open_in_github"), getTranslation(ctx, "open_in_gitlab")])
+
+  return {
+    openInVSCode,
+    openInGithub,
+    openInGitlab
+  }
+}
+
+async function restoreProjectResult(ctx: Context, projectPath: string): Promise<Result | null> {
+  const project = await getProjectByPath(projectPath)
+  if (!project) {
+    return null
+  }
+
+  const labels = await getActionLabels(ctx)
+  return createProjectResult(ctx, project, labels)
+}
+
 async function openInVSCode(ctx: Context, projectPath: string): Promise<void> {
   const platform = process.platform
 
@@ -313,12 +389,22 @@ export const plugin: Plugin = {
     await api.Log(ctx, "Info", `${initMsg} initialized`)
 
     // Listen for setting changes to clear cache
-    api.OnSettingChanged(ctx, async (_ctx: Context, key: string) => {
+    await api.OnSettingChanged(ctx, async (_ctx: Context, key: string) => {
       if (key === "scanDirectories") {
         projectsCache = []
         lastScanTime = 0
         await api.Log(_ctx, "Info", "Settings changed, cache cleared")
       }
+    })
+
+    await api.OnMRURestore(ctx, async (restoreCtx: Context, mruData) => {
+      await api.Log(restoreCtx, "Debug", `MRU restore triggered with context data: ${JSON.stringify(mruData.ContextData)}`)
+      const projectPath = mruData.ContextData[PROJECT_PATH_CONTEXT_KEY]
+      if (!projectPath) {
+        return null
+      }
+
+      return restoreProjectResult(restoreCtx, projectPath)
     })
   },
 
@@ -326,41 +412,8 @@ export const plugin: Plugin = {
     const allProjects = await ensureCache(ctx)
     const filtered = filterProjects(allProjects, query.Search)
 
-    const openInVSCodeLabel = await getTranslation(ctx, "open_in_vscode")
-    const openInGithubLabel = await getTranslation(ctx, "open_in_github")
-    const openInGitlabLabel = await getTranslation(ctx, "open_in_gitlab")
-
-    const results: Result[] = filtered.map(project => {
-      const icon = getProjectIcon(project)
-      const actions: NonNullable<Result["Actions"]> = [
-        {
-          Name: openInVSCodeLabel,
-          Icon: { ImageType: "relative", ImageData: "images/vscode.svg" },
-          IsDefault: true,
-          Action: async () => {
-            await openInVSCode(ctx, project.path)
-          }
-        }
-      ]
-
-      if (project.projectUrl && project.provider) {
-        actions.push({
-          Name: project.provider === "github" ? openInGithubLabel : openInGitlabLabel,
-          Icon: { ImageType: "relative", ImageData: project.provider === "github" ? "images/github.svg" : "images/gitlab.svg" },
-          Hotkey: "ctrl+enter",
-          Action: async () => {
-            await openProjectPage(ctx, project.projectUrl as string)
-          }
-        })
-      }
-
-      return {
-        Title: project.name,
-        SubTitle: project.path,
-        Icon: icon,
-        Actions: actions
-      }
-    })
+    const labels = await getActionLabels(ctx)
+    const results: Result[] = filtered.map(project => createProjectResult(ctx, project, labels))
 
     return results
   }

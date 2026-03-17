@@ -18,6 +18,11 @@
     "linux",
     "darwin"
   ],
+  "Features": [
+    {
+      "Name": "mru"
+    }
+  ],
   "I18n": {
     "en_US": {
       "plugin_name": "Git Projects",
