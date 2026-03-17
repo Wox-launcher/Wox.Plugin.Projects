@@ -1,14 +1,81 @@
 {
-  "Id": "[Id]",
-  "TriggerKeywords": ["[Trigger Keyword]"],
-  "Name": "[Name]",
-  "Description": "[Description]",
-  "Author": "[Author Name]",
+  "Id": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+  "TriggerKeywords": [
+    "proj",
+    "*"
+  ],
+  "Name": "i18n:plugin_name",
+  "Description": "i18n:plugin_description",
+  "Author": "qianlifeng",
   "Version": "0.0.1",
   "MinWoxVersion": "2.0.0",
   "Runtime": "nodejs",
-  "Website": "[Website]",
+  "Website": "https://github.com/Wox-launcher/Wox.Plugin.Projects",
   "Entry": "index.js",
-  "Icon": "relative:images/app.png",
-  "SupportedOS": ["windows", "linux", "darwin"]
+  "Icon": "relative:images/app.svg",
+  "SupportedOS": [
+    "windows",
+    "linux",
+    "darwin"
+  ],
+  "I18n": {
+    "en_US": {
+      "plugin_name": "Git Projects",
+      "plugin_description": "Quick search and manage local Git projects",
+      "scan_directories": "Scan Directories",
+      "scan_directories_tooltip": "Configure directories to scan for Git projects",
+      "directory_list": "Directory List",
+      "directory_list_tooltip": "Add directories to scan",
+      "directory_path": "Directory Path",
+      "disabled": "Disabled",
+      "no_results": "No projects found",
+      "no_results_subtitle": "No projects matching \"%s\"",
+      "open_in_vscode": "Open in VSCode",
+      "scanned_projects": "Scanned %d projects"
+    },
+    "zh_CN": {
+      "plugin_name": "Git 项目",
+      "plugin_description": "快速搜索和管理本地 Git 项目",
+      "scan_directories": "扫描目录",
+      "scan_directories_tooltip": "配置要扫描的 Git 项目目录",
+      "directory_list": "目录列表",
+      "directory_list_tooltip": "添加要扫描的目录路径",
+      "directory_path": "目录路径",
+      "disabled": "禁用",
+      "no_results": "未找到项目",
+      "no_results_subtitle": "没有匹配 \"%s\" 的项目",
+      "open_in_vscode": "在 VSCode 中打开",
+      "scanned_projects": "已扫描 %d 个项目"
+    }
+  },
+  "SettingDefinitions": [
+    {
+      "Type": "table",
+      "Value": {
+        "Key": "scanDirectories",
+        "DefaultValue": "[]",
+        "Title": "i18n:directory_list",
+        "Tooltip": "i18n:directory_list_tooltip",
+        "Columns": [
+          {
+            "Label": "i18n:directory_path",
+            "Key": "dirPath",
+            "Type": "dirPath",
+            "Validators": [
+              {
+                "Type": "not_empty",
+                "Value": {}
+              }
+            ]
+          },
+          {
+            "Label": "i18n:disabled",
+            "Key": "disabled",
+            "Type": "checkbox",
+            "Width": 60
+          }
+        ]
+      }
+    }
+  ]
 }

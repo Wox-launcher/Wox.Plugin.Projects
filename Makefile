@@ -35,6 +35,5 @@ build: lint format
 test:
 	pnpm test
 
-package: build
-	cd $(DIST_DIR) && zip -r ../wox.plugin.$(PLUGIN_NAME).wox .
-	@echo "Plugin packaged to wox.plugin.$(PLUGIN_NAME).wox"
+package:
+	pnpm package
