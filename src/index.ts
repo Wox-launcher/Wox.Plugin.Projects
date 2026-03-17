@@ -1,10 +1,12 @@
 import { Context, Plugin, PluginInitParams, PublicAPI, Query, Result, WoxImage } from "@wox-launcher/wox-plugin"
 import * as fs from "fs"
 import * as path from "path"
-import { exec } from "child_process"
+import { execFile } from "child_process"
 import { promisify } from "util"
 
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
+
+type GitProvider = "github" | "gitlab"
 
 interface ScanDirectory {
   dirPath: string
@@ -15,6 +17,8 @@ interface GitProject {
   name: string
   path: string
   icon?: string
+  provider?: GitProvider
+  projectUrl?: string
 }
 
 let api: PublicAPI
@@ -105,15 +109,105 @@ async function scanDirectory(dirPath: string): Promise<GitProject[]> {
     if (fs.existsSync(path.join(fullPath, ".git"))) {
       // Check if it's a Wox plugin
       const woxIcon = getWoxPluginIcon(fullPath)
+      const projectPage = await getProjectPageInfo(fullPath)
       projects.push({
         name: entry.name,
         path: fullPath,
-        icon: woxIcon
+        icon: woxIcon,
+        provider: projectPage?.provider,
+        projectUrl: projectPage?.projectUrl
       })
     }
   }
 
   return projects
+}
+
+async function getProjectPageInfo(projectPath: string): Promise<{ provider: GitProvider; projectUrl: string } | undefined> {
+  const remoteUrl = await getRemoteUrl(projectPath)
+  if (!remoteUrl) {
+    return undefined
+  }
+
+  return parseProjectPageUrl(remoteUrl)
+}
+
+async function getRemoteUrl(projectPath: string): Promise<string | undefined> {
+  const remoteKeys = ["remote.origin.url", "remote.upstream.url"]
+
+  for (const remoteKey of remoteKeys) {
+    try {
+      const { stdout } = await execFileAsync("git", ["-C", projectPath, "config", "--get", remoteKey])
+      const remoteUrl = stdout.trim()
+      if (remoteUrl) {
+        return remoteUrl
+      }
+    } catch {
+      // Ignore missing remotes and try the next candidate.
+    }
+  }
+
+  return undefined
+}
+
+function parseProjectPageUrl(remoteUrl: string): { provider: GitProvider; projectUrl: string } | undefined {
+  const normalizedRemoteUrl = remoteUrl.trim()
+  const provider = getGitProvider(normalizedRemoteUrl)
+  if (!provider) {
+    return undefined
+  }
+
+  const projectPath = extractRemoteProjectPath(normalizedRemoteUrl, provider)
+  if (!projectPath) {
+    return undefined
+  }
+
+  return {
+    provider,
+    projectUrl: `https://${provider}.com/${projectPath}`
+  }
+}
+
+function getGitProvider(remoteUrl: string): GitProvider | undefined {
+  if (remoteUrl.includes("github.com")) {
+    return "github"
+  }
+
+  if (remoteUrl.includes("gitlab.com")) {
+    return "gitlab"
+  }
+
+  return undefined
+}
+
+function extractRemoteProjectPath(remoteUrl: string, provider: GitProvider): string | undefined {
+  const normalizedRemoteUrl = remoteUrl.replace(/\\/g, "/")
+  const host = `${provider}.com`
+
+  const protocolMatch = normalizedRemoteUrl.match(new RegExp(`^(?:https?:\\/\\/|ssh:\\/\\/git@)${escapeRegExp(host)}[/:](.+)$`, "i"))
+  if (protocolMatch?.[1]) {
+    return sanitizeRemoteProjectPath(protocolMatch[1])
+  }
+
+  const sshMatch = normalizedRemoteUrl.match(new RegExp(`^(?:git@)?${escapeRegExp(host)}:(.+)$`, "i"))
+  if (sshMatch?.[1]) {
+    return sanitizeRemoteProjectPath(sshMatch[1])
+  }
+
+  return undefined
+}
+
+function sanitizeRemoteProjectPath(projectPath: string): string | undefined {
+  const normalizedPath = projectPath
+    .replace(/\.git$/i, "")
+    .replace(/^\//, "")
+    .replace(/\/+$/, "")
+
+  return normalizedPath || undefined
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 async function ensureCache(ctx: Context): Promise<GitProject[]> {
@@ -138,7 +232,7 @@ function filterProjects(projects: GitProject[], search: string): GitProject[] {
   return projects.filter(p => p.name.toLowerCase().includes(lowerSearch))
 }
 
-function parseIcon(iconString: string, _projectPath: string): WoxImage {
+function parseIcon(iconString: string): WoxImage {
   if (iconString.startsWith("emoji:")) {
     return { ImageType: "emoji", ImageData: iconString.slice(6) }
   } else if (iconString.startsWith("absolute:")) {
@@ -156,22 +250,59 @@ function parseIcon(iconString: string, _projectPath: string): WoxImage {
   return { ImageType: "emoji", ImageData: "📂" }
 }
 
+function getProjectIcon(project: GitProject): WoxImage {
+  if (project.icon) {
+    return parseIcon(project.icon)
+  }
+
+  if (project.provider === "github") {
+    return parseIcon("relative:images/github.svg")
+  }
+
+  if (project.provider === "gitlab") {
+    return parseIcon("relative:images/gitlab.svg")
+  }
+
+  return parseIcon("relative:images/app.svg")
+}
+
 async function openInVSCode(ctx: Context, projectPath: string): Promise<void> {
   const platform = process.platform
-  let command: string
 
   if (platform === "darwin") {
-    command = `open -a "Visual Studio Code" "${projectPath}"`
-  } else if (platform === "win32") {
-    command = `code "${projectPath}"`
-  } else {
-    command = `code "${projectPath}"`
+    try {
+      await execFileAsync("open", ["-a", "Visual Studio Code", projectPath])
+      return
+    } catch (error) {
+      await api.Log(ctx, "Error", `Failed to open VSCode: ${error}`)
+      return
+    }
   }
 
   try {
-    await execAsync(command)
+    await execFileAsync("code", [projectPath])
   } catch (error) {
     await api.Log(ctx, "Error", `Failed to open VSCode: ${error}`)
+  }
+}
+
+async function openProjectPage(ctx: Context, projectUrl: string): Promise<void> {
+  const platform = process.platform
+
+  try {
+    if (platform === "darwin") {
+      await execFileAsync("open", [projectUrl])
+      return
+    }
+
+    if (platform === "win32") {
+      await execFileAsync("cmd", ["/c", "start", "", projectUrl])
+      return
+    }
+
+    await execFileAsync("xdg-open", [projectUrl])
+  } catch (error) {
+    await api.Log(ctx, "Error", `Failed to open project page: ${error}`)
   }
 }
 
@@ -182,7 +313,7 @@ export const plugin: Plugin = {
     await api.Log(ctx, "Info", `${initMsg} initialized`)
 
     // Listen for setting changes to clear cache
-    api.OnSettingChanged(ctx, async (_ctx: Context, key: string, _value: string) => {
+    api.OnSettingChanged(ctx, async (_ctx: Context, key: string) => {
       if (key === "scanDirectories") {
         projectsCache = []
         lastScanTime = 0
@@ -196,23 +327,38 @@ export const plugin: Plugin = {
     const filtered = filterProjects(allProjects, query.Search)
 
     const openInVSCodeLabel = await getTranslation(ctx, "open_in_vscode")
+    const openInGithubLabel = await getTranslation(ctx, "open_in_github")
+    const openInGitlabLabel = await getTranslation(ctx, "open_in_gitlab")
 
     const results: Result[] = filtered.map(project => {
-      const icon = project.icon ? parseIcon(project.icon, "") : parseIcon("relative:images/app.svg", "")
+      const icon = getProjectIcon(project)
+      const actions: NonNullable<Result["Actions"]> = [
+        {
+          Name: openInVSCodeLabel,
+          Icon: { ImageType: "relative", ImageData: "images/vscode.svg" },
+          IsDefault: true,
+          Action: async () => {
+            await openInVSCode(ctx, project.path)
+          }
+        }
+      ]
+
+      if (project.projectUrl && project.provider) {
+        actions.push({
+          Name: project.provider === "github" ? openInGithubLabel : openInGitlabLabel,
+          Icon: { ImageType: "relative", ImageData: project.provider === "github" ? "images/github.svg" : "images/gitlab.svg" },
+          Hotkey: "ctrl+enter",
+          Action: async () => {
+            await openProjectPage(ctx, project.projectUrl as string)
+          }
+        })
+      }
+
       return {
         Title: project.name,
         SubTitle: project.path,
         Icon: icon,
-        Actions: [
-          {
-            Name: openInVSCodeLabel,
-            Icon: { ImageType: "relative", ImageData: "images/vscode.svg" },
-            IsDefault: true,
-            Action: async () => {
-              await openInVSCode(ctx, project.path)
-            }
-          }
-        ]
+        Actions: actions
       }
     })
 

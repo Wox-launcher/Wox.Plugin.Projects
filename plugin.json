@@ -31,6 +31,8 @@
       "no_results": "No projects found",
       "no_results_subtitle": "No projects matching \"%s\"",
       "open_in_vscode": "Open in VSCode",
+      "open_in_github": "Open GitHub Project Page",
+      "open_in_gitlab": "Open GitLab Project Page",
       "scanned_projects": "Scanned %d projects"
     },
     "zh_CN": {
@@ -45,6 +47,8 @@
       "no_results": "未找到项目",
       "no_results_subtitle": "没有匹配 \"%s\" 的项目",
       "open_in_vscode": "在 VSCode 中打开",
+      "open_in_github": "打开 GitHub 项目页面",
+      "open_in_gitlab": "打开 GitLab 项目页面",
       "scanned_projects": "已扫描 %d 个项目"
     }
   },
