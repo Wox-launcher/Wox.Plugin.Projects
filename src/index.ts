@@ -25,6 +25,8 @@ interface GitProject {
 
 interface ActionLabels {
   openInVSCode: string
+  copyPath: string
+  openInFileManager: string
   openInGithub: string
   openInGitlab: string
   justNow: string
@@ -702,6 +704,22 @@ function createProjectActions(ctx: Context, project: GitProject, labels: ActionL
       Action: async () => {
         await openInVSCode(ctx, project.path)
       }
+    },
+    {
+      Name: labels.copyPath,
+      Icon: { ImageType: "emoji", ImageData: "📋" },
+      ContextData: contextData,
+      Action: async () => {
+        await copyProjectPath(ctx, project.path)
+      }
+    },
+    {
+      Name: labels.openInFileManager,
+      Icon: { ImageType: "emoji", ImageData: "🗂️" },
+      ContextData: contextData,
+      Action: async () => {
+        await openInFileManager(ctx, project.path)
+      }
     }
   ]
 
@@ -741,8 +759,10 @@ function createProjectTails(project: GitProject, labels: ActionLabels): NonNulla
 }
 
 async function getActionLabels(ctx: Context): Promise<ActionLabels> {
-  const [openInVSCode, openInGithub, openInGitlab, justNow, minutesAgo, hoursAgo, daysAgo] = await Promise.all([
+  const [openInVSCode, copyPath, openInFileManager, openInGithub, openInGitlab, justNow, minutesAgo, hoursAgo, daysAgo] = await Promise.all([
     getTranslation(ctx, "open_in_vscode"),
+    getTranslation(ctx, "copy_path"),
+    getTranslation(ctx, "open_in_file_manager"),
     getTranslation(ctx, "open_in_github"),
     getTranslation(ctx, "open_in_gitlab"),
     getTranslation(ctx, "just_now"),
@@ -753,6 +773,8 @@ async function getActionLabels(ctx: Context): Promise<ActionLabels> {
 
   return {
     openInVSCode,
+    copyPath,
+    openInFileManager,
     openInGithub,
     openInGitlab,
     justNow,
@@ -789,6 +811,34 @@ async function openInVSCode(ctx: Context, projectPath: string): Promise<void> {
     await execFileAsync("code", [projectPath])
   } catch (error) {
     await api.Log(ctx, "Error", `Failed to open VSCode: ${error}`)
+  }
+}
+
+async function copyProjectPath(ctx: Context, projectPath: string): Promise<void> {
+  try {
+    await api.Copy(ctx, { type: "text", text: projectPath })
+  } catch (error) {
+    await api.Log(ctx, "Error", `Failed to copy project path: ${error}`)
+  }
+}
+
+async function openInFileManager(ctx: Context, projectPath: string): Promise<void> {
+  const platform = process.platform
+
+  try {
+    if (platform === "darwin") {
+      await execFileAsync("open", [projectPath])
+      return
+    }
+
+    if (platform === "win32") {
+      await execFileAsync("explorer", [projectPath])
+      return
+    }
+
+    await execFileAsync("xdg-open", [projectPath])
+  } catch (error) {
+    await api.Log(ctx, "Error", `Failed to open project in file manager: ${error}`)
   }
 }
 
