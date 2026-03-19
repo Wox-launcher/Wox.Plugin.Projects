@@ -746,7 +746,8 @@ async function createProjectResult(ctx: Context, project: GitProject, labels: Ac
     SubTitle: project.path,
     Icon: getProjectIcon(ctx, project, resultId),
     Tails: createProjectTails(project, labels),
-    Actions: createProjectActions(ctx, project, labels)
+    Actions: createProjectActions(ctx, project, labels),
+    Score: project.lastCommitTimestampMs || 0
   }
 }
 
@@ -807,6 +808,18 @@ async function openInVSCode(ctx: Context, projectPath: string): Promise<void> {
     }
   }
 
+  if (platform === "win32") {
+    try {
+      // Use cmd /c start with /b to open VSCode without showing CMD window
+      await execFileAsync("cmd", ["/c", "start", "/b", "code", projectPath])
+      return
+    } catch (error) {
+      await api.Log(ctx, "Error", `Failed to open VSCode: ${error}`)
+      return
+    }
+  }
+
+  // Linux and other platforms
   try {
     await execFileAsync("code", [projectPath])
   } catch (error) {
